@@ -51,4 +51,6 @@ for n in range (H_output):
             print("partial_input_img shape:",partial_input_img.shape,"\n(n,m):",n,m)
         output[n,m] = np.sum(partial_input_img * filter)
 
-print ("output size:", output)
+print ("output:", output)
+
+continue
