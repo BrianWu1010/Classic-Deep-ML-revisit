@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import math
 
 # input
 img = cv2.imread('/Users/boyuanwu/Projects/Classic-Deep-ML-revisit/CNNs/Flower_Data/train/daisy/144076848_57e1d662e3_m.jpg')
@@ -36,33 +37,72 @@ def ReLu(x):
     a[a<0] = 0
     return a
 
+def padding(input_matrix, H_window, W_window, stride):
+    C_output = input_matrix.shape[-1]
+
+    H_input, W_input = input_matrix.shape[:2]
+    H_output = math.ceil((H_input - H_window) / stride) + 1
+    H_padding = (H_output - 1) * stride + H_window - H_input
+    W_output = math.ceil((W_input - W_window) / stride) + 1
+    W_padding = (W_output - 1) * stride + W_window - W_input
+
+    H_pad_top = H_padding //2
+    H_pad_bottom = H_padding - H_pad_top
+    W_pad_right = W_padding //2
+    W_pad_left = W_padding - W_pad_right
+
+    # Padding; using np.pad(array, pad_width_spec, mode); where pad_with_spec is ((top, bottom), (left,right), (channel_before, channel_after))
+    padded = np.pad (input_matrix, ((H_pad_top, H_pad_bottom), (W_pad_right, W_pad_left), (0,0)), mode = 'constant', constant_values = 0)
+
+    return padded, H_output, W_output, C_output
+
 # Max_pooling function
-def max_pooling (input_matrix, window_size):
-    H_input, W_input = input_matrix.shape # How to only get the H and W, no matter what the shape is?
-    H_output = int(H_input / window_size)
-    W_ouutput = int(W_input / window_size)
-    output = np.zeros 
-    for n in range (H_input):
-        for m in range (W_input):
-            partial_input_img = input_matrix [n : n + window_size, m : m + window_size]
-            return 
+def max_pooling (input_matrix, H_pool, W_pool, stride):
+    '''
+    performing a max pooling on input_matrix
+
+    Args:
+    input_matrix: Array of shape (H, W, C)
+    pool_size: int
+    stride : int
+    '''
+    input_padded, H_output, W_output = padding(input_matrix, H_pool, W_pool, stride)[:3]
+    C_output = input_padded.shape [-1]
+    max_pooled = np.zeros((H_output, W_output, C_output))
+    for n in range (H_output):
+        index_n = n * stride # locate the top index of the window in the input img
+        for m in range (W_output):
+            index_m = m * stride # locate the left index of the window in the input img
+            partial_input = input_padded [index_n : index_n + H_pool , index_m : index_m + W_pool, :]
+            # compare every element from H and W in the layer of C. To achieve that, first collapse the H and W, then compare across the different channels' value
+            # since the axis 0 is H, and axis 1 is W; only need to froze the axis 2, to avoid comparism among the channels.
+            max_pooled[n, m, :] = np.max(partial_input, axis = (0,1))
+    return max_pooled
 
 
-# Padding; using np.pad(array, pad_width_spec, mode); where pad_with_spec is ((top, bottom), (left,right), (channel_before, channel_after))
-padded_img = np.pad (img, ((padding,padding), (padding,padding), (0,0)), mode = 'constant', constant_values = 0)
+# 1. Padding raw img
+# padded_img: padded input raw img; H_output, W_output, C_output: the shapd of the output of filter applied padded_img
+padded_img, H_output, W_output, C_output = padding (img, H_filter, W_filter, 1)
 print ("padded image shape", padded_img.shape)
 
-H_output, W_output, C_output = output_size (H_input, W_input, N_k_layer1, H_filter, W_filter, padding, stride)
 output = np.zeros ((H_output, W_output, C_output))
 
-# Patches generation, using im2col(image to column) method (based on Toepliz Matrix)
-patches = []
+# 2. Patches generation, using im2col(image to column) method (based on Toepliz Matrix)
+N_patches = H_output * W_output
+H_patches = H_filter
+W_patches = W_filter
+C_patches = C_input
+patches = np.zeros((N_patches, H_patches, W_patches, C_patches))
+patch_count = 0
 for n in range (H_output):
+    index_n = n * stride
     for m in range (W_output):
-        partial_input_img = padded_img [n : n + H_filter, m : m + W_filter]
-        patches.append(partial_input_img)
+        index_m = m * stride
+        partial_input_img = padded_img [index_n : index_n + H_filter, index_m : index_m + W_filter]
+        patches[patch_count, :, :, :] = partial_input_img
+        patch_count += 1
 patches = np.array (patches)
-print ("patches shape: ", patches.shape) # Shape: (Number of Patches, H__patch, W_patch, C_input)
+print ("patches shape: ", patches.shape) # Shape: (n_patches(Number of Patches), H_patch, W_patch, C_input)
 
 # filter_layer1 generation
 filter_layer1 = filter_generator(N_k_layer1, H_filter, W_filter, C_input)
@@ -74,14 +114,15 @@ print ("patches_im2col shape: ", patches_im2col.shape)
 filter_layer1_flat = filter_layer1.reshape(-1, 27)    # matrix shape (number of kernels, kernel values)-> kernal_value = (kernel pixal value for RGB of first patch's first pixal)(kernal pixal value for RGB of first patch's second pixal)...
 filter_layer1_col = filter_layer1_flat.T
 print ("filter_vertical shape: ", filter_layer1_col.shape)
+
 output_flattened = patches_im2col @ filter_layer1_col
 print ("output_flattened shape:", output_flattened.shape)
 
-# Convolution using einsum(Einstein Summation); another way to do convolution; it is not as intuitive as the pure reshaping method.
-# output_vertical = np.einsum('phwc,khwc -> pk', patches, filter_layer1)
-
-output = output_flattened.reshape (H_output, W_output, C_output) # Reconstructing output matrix from flatten one
+output = output_flattened.T.reshape (N_k_layer1, H_output, W_output) # Reconstructing output matrix from flatten one
 
 # ReLu activate output
 output_activated = ReLu (output)
 
+# Max pooling
+output_maxpooled = max_pooling(output_activated, 2, 2, 1)
+print(output_maxpooled)
