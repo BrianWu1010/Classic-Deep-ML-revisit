@@ -1,175 +1,253 @@
-# Classic Deep ML Revisit
+# CNN From Scratch — Implementation Notes
 
-A from-scratch reconstruction of classical deep learning components with explicit control over tensor transformations and numerical operations.
-
----
-
-## Objective
-
-This repository focuses on rebuilding core deep learning operations using only low-level numerical tools (NumPy), with the goal of making every transformation **traceable, verifiable, and mathematically grounded**.
-
-The emphasis is not performance, but **mechanistic transparency**.
+This document explains the internal logic of the CNN pipeline implemented in `CNNs.py`. The goal is not performance, but structural clarity and mathematical correctness.
 
 ---
 
-## Design Philosophy
+## Tensor Convention
 
-- **First-principles implementation**  
-  Every operation (convolution, pooling, activation) is derived directly from its mathematical definition.
-
-- **Explicit tensor transformations**  
-  All reshaping, flattening, and dimension transitions are written out and inspectable.
-
-- **Minimal abstraction**  
-  Avoid frameworks (PyTorch, TensorFlow) to expose underlying computation.
-
-- **Shape discipline**  
-  A consistent tensor convention is enforced across the pipeline:
-  ```
-  (H, W, C)
-  ```
-
-- **Vectorization over loops**  
-  Prefer linear algebra formulations (im2col + GEMM) over nested iteration.
-
----
-
-## Implemented Components
-
-### 1. Convolution Pipeline (Fully Vectorized)
-
-- Dynamic **same-style padding**
-- Patch extraction via:
-  - `np.lib.stride_tricks.sliding_window_view`
-- im2col transformation:
-  ```
-  (H, W, Hf, Wf, C) → (N_patches, Hf * Wf * C)
-  ```
-- Kernel flattening:
-  ```
-  (N_k, Hf, Wf, C) → (Hf * Wf * C, N_k)
-  ```
-- Convolution via matrix multiplication:
-  ```
-  output = patches_im2col @ kernel_matrix
-  ```
-- Output reconstruction:
-  ```
-  → (H_out, W_out, N_k)
-  ```
-
----
-
-### 2. Initialization
-
-- He initialization:
-  ```
-  W ~ N(0, 2 / fan_in)
-  ```
-- Stabilizes variance across layers.
-
----
-
-### 3. Activation
-
-- ReLU (element-wise thresholding at zero)
-
----
-
-### 4. Max Pooling
-
-- Sliding window with dynamic padding
-- Channel-wise reduction:
-  ```
-  max over (H, W), preserve C
-  ```
-- Explicit stride handling
-- Output shape aligned with convolution pipeline
-
----
-
-## Current Architecture (Single Block)
+All tensors follow:
 
 ```
-Input Image (H, W, C)
-        ↓
+(H, W, C)
+```
+
+- H: height  
+- W: width  
+- C: channels  
+
+---
+
+## Pipeline Overview
+
+```
+Input Image
+    ↓
 Padding
-        ↓
-Sliding Window (patch extraction)
-        ↓
-im2col (flatten patches)
-        ↓
+    ↓
+Sliding Window Extraction
+    ↓
+im2col Transformation
+    ↓
 Matrix Multiplication (Convolution)
-        ↓
-Reshape → (H, W, N_k)
-        ↓
-ReLU
-        ↓
+    ↓
+Reshape to Feature Map
+    ↓
+ReLU Activation
+    ↓
 Max Pooling
 ```
 
 ---
 
-## Key Engineering Improvements
+## 1. Padding
 
-- Eliminated hard-coded dimensions (e.g., `27`)
-- Replaced nested loops with vectorized window extraction
-- Unified padding logic across convolution and pooling
-- Standardized tensor layout `(H, W, C)`
-- Enforced `float32` consistency
-- Clear separation between:
-  - data extraction
-  - linear algebra computation
-  - shape reconstruction
+### Purpose
+Ensure that convolution windows fully cover the input, especially at boundaries.
 
----
+### Method
 
-## What This Repository Demonstrates
+Padding is computed dynamically:
 
-- Convolution as matrix multiplication (im2col + GEMM)
-- Tensor reshaping as a computational tool
-- Effects of padding and stride on spatial resolution
-- Pooling as structured reduction
-- Dependence of implementation on memory layout and shape conventions
+```
+H_out = ceil((H_in - H_filter) / stride) + 1
+Padding = (H_out - 1) * stride + H_filter - H_in
+```
+
+Padding is split symmetrically:
+- top / bottom
+- left / right
 
 ---
 
-## Limitations
+## 2. Sliding Window (Patch Extraction)
 
-- No backpropagation
-- No batching (single image only)
-- No bias terms in convolution
-- No modular layer abstraction
-- CPU-only (NumPy)
+Instead of nested loops, patches are extracted using:
 
----
+```
+np.lib.stride_tricks.sliding_window_view
+```
 
-## Next Steps
+Output shape:
 
-- Add bias to convolution
-- Implement backward pass (gradients)
-- Support batch input: `(N, H, W, C)`
-- Refactor into reusable layers:
-  - `Conv2D`
-  - `ReLU`
-  - `MaxPool`
-- Validate against PyTorch / TensorFlow outputs
-- Extend to multi-layer CNN + classifier
+```
+(H_out, W_out, H_filter, W_filter, C)
+```
 
----
+This represents all receptive fields across the image.
 
-## Tools
+Stride is applied by slicing:
 
-- Python
-- NumPy
-- OpenCV
+```
+windows[::stride, ::stride]
+```
 
 ---
 
-## Long-Term Goal
+## 3. im2col Transformation
 
-To build a complete deep learning stack from scratch where:
+Each patch is flattened:
 
-- every tensor transformation is explicit,
-- every computation is verifiable,
-- and no abstraction is treated as a black box.
+```
+(H_filter, W_filter, C) → (H_filter * W_filter * C)
+```
+
+Final shape:
+
+```
+(N_patches, patch_size)
+```
+
+Where:
+```
+N_patches = H_out * W_out
+```
+
+---
+
+## 4. Kernel Transformation
+
+Filters:
+
+```
+(N_k, H_filter, W_filter, C)
+```
+
+Flattened into:
+
+```
+(patch_size, N_k)
+```
+
+---
+
+## 5. Convolution via Matrix Multiplication
+
+Core operation:
+
+```
+output_flat = patches_im2col @ kernel_matrix
+```
+
+Shape:
+
+```
+(N_patches, N_k)
+```
+
+This is equivalent to applying all kernels to all patches simultaneously.
+
+---
+
+## 6. Output Reconstruction
+
+Reshape back to spatial structure:
+
+```
+(H_out, W_out, N_k)
+```
+
+Each channel corresponds to one kernel.
+
+---
+
+## 7. ReLU Activation
+
+Element-wise:
+
+```
+max(0, x)
+```
+
+Applied directly to the feature map.
+
+---
+
+## 8. Max Pooling
+
+### Operation
+
+- Sliding window over feature map
+- Take maximum over spatial dimensions
+- Preserve channel dimension
+
+```
+(H_pool, W_pool, C) → (1, 1, C)
+```
+
+### Implementation Detail
+
+```
+np.max(window, axis=(0,1))
+```
+
+---
+
+## Key Design Decisions
+
+### 1. Vectorization over Loops
+- im2col + matrix multiplication replaces nested convolution loops
+- closer to how real libraries implement convolution
+
+### 2. No Hard-Coded Dimensions
+- all shapes derived from input and parameters
+- improves generality
+
+### 3. Explicit Shape Transitions
+- every reshape is intentional and traceable
+- avoids silent broadcasting errors
+
+### 4. Unified Padding Logic
+- same function supports both convolution and pooling
+
+---
+
+## What This Implementation Reveals
+
+- Convolution is fundamentally a **dot product over flattened patches**
+- CNN efficiency comes from **linear algebra optimization**, not magic
+- Tensor reshaping changes **computation semantics**, not data
+- Pooling is simply a structured reduction
+
+---
+
+## Known Gaps
+
+- No bias term in convolution
+- No gradient computation
+- No batching
+- No layer abstraction (everything is procedural)
+
+---
+
+## Next Engineering Targets
+
+- Add bias:  
+  ```
+  output += bias
+  ```
+
+- Backpropagation:
+  - gradient wrt filters
+  - gradient wrt input
+
+- Batch support:
+  ```
+  (N, H, W, C)
+  ```
+
+- Modular layers:
+  - Conv2D
+  - Activation
+  - Pooling
+
+---
+
+## Positioning
+
+This implementation sits between:
+
+- mathematical derivation (paper-level)
+- production frameworks (PyTorch)
+
+It is intended as a **bridge layer for understanding**, not a deployment system.
