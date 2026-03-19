@@ -1,23 +1,24 @@
 import numpy as np
-import cv2
 import math
+import random
+from tensorflow.keras.datasets import mnist
 
-# input
-img = cv2.imread('/Users/boyuanwu/Projects/Classic-Deep-ML-revisit/CNNs/Flower_Data/train/daisy/144076848_57e1d662e3_m.jpg')
-img = img.astype(np.float32)
-print ("image shape:", img.shape) 
-H_input, W_input, C_input = img.shape
 
-# Hyperparameters definition
-padding = 1
-conv_stride = 1
-# Filter Hyperparameters; filter size (N_k , (H_filter = 3) , (W_filter = 3) , (C_filter = 3)); N_k stand for numbers of kernels
-# note: normally, Kernel is a 3D matrix with Height Width and Channels; Filter is a collection of kernels, which is a 4D matrix.
-N_k_layer1 = 32
-N_k_layer2 = 64
-N_k_layer3 = 128
-H_filter = 3
-W_filter = 3
+# Batches creator
+def batch_generator (x, y, batch_size):
+    '''
+    x: input img matrix, shape: (n_total_input, H_input, W_input, C_input)
+    y: according labels, shape: (n_tital_lables,)
+    batch_size: int, numbers of img for one batch
+    '''
+    N_input, H_input, W_input, C_input = x.shape[0:4]
+    input_index_list = np.arange (N_input)
+    random.shuffle(input_index_list) # shuffle index for img selection
+    for index in range (0, N_input, batch_size):
+        small_index_list = input_index_list[index: index + batch_size]
+        x_batch = x[small_index_list]
+        y_batch = y[small_index_list]
+        yield x_batch, y_batch
 
 # Filter Matrix Generator
 def filter_generator(Num_Kernel, H_filter, W_filter, C_input):
@@ -33,7 +34,7 @@ def ReLu(x):
 
 def padding(input_matrix, H_window, W_window, stride):
 
-    H_input, W_input = input_matrix.shape[:2]
+    H_input, W_input = input_matrix.shape[1:3]
     H_conved = math.ceil((H_input - H_window) / stride) + 1
     H_padding = (H_conved - 1) * stride + H_window - H_input
     W_conved = math.ceil((W_input - W_window) / stride) + 1
@@ -44,8 +45,8 @@ def padding(input_matrix, H_window, W_window, stride):
     W_pad_left = W_padding //2
     W_pad_right = W_padding - W_pad_left
 
-    # Padding; using np.pad(array, pad_width_spec, mode); where pad_with_spec is ((top, bottom), (left,right), (channel_before, channel_after))
-    padded = np.pad (input_matrix, ((H_pad_top, H_pad_bottom), (W_pad_left, W_pad_right), (0,0)), mode = 'constant', constant_values = 0)
+    # Padding; using np.pad(array, pad_width_spec, mode); where pad_with_spec is ((imgs_front, imgs_tail)(top, bottom), (left,right), (channel_before, channel_after))
+    padded = np.pad (input_matrix, ((0,0)(H_pad_top, H_pad_bottom), (W_pad_left, W_pad_right), (0,0)), mode = 'constant', constant_values = 0)
 
     return padded, H_conved, W_conved
 
@@ -73,9 +74,42 @@ def max_pooling (input_matrix, H_pool, W_pool, stride):
     return max_pooled
 
 
+# Hyperparameters definition
+padding = 1
+conv_stride = 1
+# Filter Hyperparameters; filter size (N_k , (H_filter = 3) , (W_filter = 3) , (C_filter = 3)); N_k stand for numbers of kernels
+# note: normally, Kernel is a 3D matrix with Height Width and Channels; Filter is a collection of kernels, which is a 4D matrix.
+N_k_layer1 = 32
+N_k_layer2 = 64
+N_k_layer3 = 128
+H_filter = 3
+W_filter = 3
+
+
+
+
+
+
+
+
+
+
+
+# 0. load dataset
+(x_train, y_train),(x_test, y_test) = mnist.load_data()
+# input img 28×28 grayscale, values in [0, 255]
+# x: imgs, shape (number_img, 28, 28); y: labels, shape (number_img, )
+
+x_train = x_train.reshape(-1, 28, 28, 1) # reshaping: (N_p, H_input, W_input, C_input)
+x_test = x_test.reshape(-1, 28, 28, 1) # reshaping: (N_p, H_input, W_input, C_input)
+
+print ("x_train: ", x_train.shape, "y_train: ", y_train.shape)
+print ("x_test: ", x_test.shape, "y_test: ", y_test.shape)
+
+
 # 1. Padding raw img
 # padded_img: padded input raw img; H_output, W_output, C_output: the shape of the output of filter applied padded_img
-padded_img, H_conved, W_conved = padding (img, H_filter, W_filter, 1)
+padded_img, H_conved, W_conved = padding (x_train, H_filter, W_filter, 1)
 
 print ("padded image shape", padded_img.shape)
 
@@ -83,16 +117,18 @@ print ("padded image shape", padded_img.shape)
 windows = np.lib.stride_tricks.sliding_window_view(
     padded_img,
     window_shape = (H_filter, W_filter),
-    axis = (0, 1)
+    axis = (1, 2)
 )
-# shape: (H_padded - H_filter + 1, W_padded - W_filter + 1, C_input, H_filter, W_filter); consider it as stride = 1, then extract all the possible patches
+# shape: (N_p, H_padded - H_filter + 1, W_padded - W_filter + 1, C_input, H_filter, W_filter); consider it as stride = 1, then extract all the possible patches
+# N_p: number of img in a patch
 
-windows = windows.transpose(0, 1, 3, 4, 2)
-# shape: (H_patches, W_patches, H_filter, W_filter, C_input)
+windows = windows.transpose(0, 1, 2, 4, 5, 3)
+# shape: (N_p, H_patches, W_patches, H_filter, W_filter, C_input)
+N_p, H_patches, W_patches, H_filter, W_filter, C_input = windows.shape()
 
-patches = windows[::conv_stride, ::conv_stride, :, :, :]
+patches = windows[:, ::conv_stride, ::conv_stride, :, :, :]
 
-patches_im2col = patches.reshape(-1, H_filter * W_filter * C_input) # matrix shape (number of patches, pixal values)-> pixal_value = (RGB of first patch's first pixal)(RGB of first patch's second pixal)...
+patches_im2col = patches.reshape(N_p, H_filter * W_filter * C_input) # matrix shape (number of patches, pixal values)-> pixal_value = (RGB of first patch's first pixal)(RGB of first patch's second pixal)...
 
 print("patches shape:", patches.shape)
 print("patches_col shape:", patches_im2col.shape)
@@ -117,3 +153,4 @@ output_activated = ReLu (output)
 # 6. Max pooling
 output_maxpooled = max_pooling(output_activated, 2, 2, 2)
 print(output_maxpooled)
+
