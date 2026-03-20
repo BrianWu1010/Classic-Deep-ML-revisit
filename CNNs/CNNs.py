@@ -5,7 +5,7 @@ from tensorflow.keras.datasets import mnist
 
 
 # Batches creator
-def batch_generator (x, y, batch_size):
+def batch_generator (self, x, y, batch_size):
     '''
     x: input img matrix, shape: (n_total_input, H_input, W_input, C_input)
     y: according labels, shape: (n_tital_lables,)
@@ -33,22 +33,24 @@ def ReLu(x):
     return a
 
 def padding(input_matrix, H_window, W_window, stride):
-
+    '''
+    input_matrix: 4D matrix, shape (number_img, H_img, W_img, C_img)
+    H_window: int
+    W_window: int
+    stride: int
+    '''
     H_input, W_input = input_matrix.shape[1:3]
-    H_conved = math.ceil((H_input - H_window) / stride) + 1
-    H_padding = (H_conved - 1) * stride + H_window - H_input
-    W_conved = math.ceil((W_input - W_window) / stride) + 1
-    W_padding = (W_conved - 1) * stride + W_window - W_input
-
-    H_pad_top = H_padding //2
-    H_pad_bottom = H_padding - H_pad_top
-    W_pad_left = W_padding //2
-    W_pad_right = W_padding - W_pad_left
-
-    # Padding; using np.pad(array, pad_width_spec, mode); where pad_with_spec is ((imgs_front, imgs_tail)(top, bottom), (left,right), (channel_before, channel_after))
-    padded = np.pad (input_matrix, ((0,0)(H_pad_top, H_pad_bottom), (W_pad_left, W_pad_right), (0,0)), mode = 'constant', constant_values = 0)
-
-    return padded, H_conved, W_conved
+    H_window_applied = math.ceil((H_input - H_window) / stride) + 1        # Height of the output of the window applied input
+    H_padding = (H_window_applied - 1) * stride + H_window - H_input       # Needed padding on Height
+    W_window_applied = math.ceil((W_input - W_window) / stride) + 1        # Width of the output of the window applied input
+    W_padding = (W_window_applied - 1) * stride + W_window - W_input       # Needed padding on Width
+    H_pad_top = H_padding //2        # Padding on the top of the Height
+    H_pad_bottom = H_padding - H_pad_top      # Padding on the bottom of the Height
+    W_pad_left = W_padding //2     # Padding on the left of the Width
+    W_pad_right = W_padding - W_pad_left     # Padding on the right of the Width
+    # Padding; using np.pad(array, pad_width_spec, mode); where for input_matrix pad_with_spec is ((imgs_front, imgs_tail)(top, bottom), (left,right), (channel_before, channel_after))
+    padded = np.pad (input_matrix, ((0,0)(H_pad_top, H_pad_bottom), (W_pad_left, W_pad_right), (0,0)), mode = 'constant', constant_values = 0)      # Padded matrix
+    return padded, H_window_applied, W_window_applied
 
 # Max_pooling function
 def max_pooling (input_matrix, H_pool, W_pool, stride):
@@ -74,6 +76,10 @@ def max_pooling (input_matrix, H_pool, W_pool, stride):
     return max_pooled
 
 
+
+
+
+
 # Hyperparameters definition
 padding = 1
 conv_stride = 1
@@ -95,23 +101,24 @@ W_filter = 3
 
 
 
-# 0. load dataset
-(x_train, y_train),(x_test, y_test) = mnist.load_data()
-# input img 28×28 grayscale, values in [0, 255]
-# x: imgs, shape (number_img, 28, 28); y: labels, shape (number_img, )
-
-x_train = x_train.reshape(-1, 28, 28, 1) # reshaping: (N_p, H_input, W_input, C_input)
-x_test = x_test.reshape(-1, 28, 28, 1) # reshaping: (N_p, H_input, W_input, C_input)
-
+# step 0. load dataset
+(x_train, y_train),(x_test, y_test) = mnist.load_data()   # x: imgs, shape (number_img, 28, 28); y: labels, shape (number_img, ); input img 28×28 grayscale, values in [0, 255]
+x_train = x_train.reshape(-1, 28, 28, 1) # reshaping: (N_img, H_img, W_img, C_img); since inputs are grey scale, channel_input is 1
+x_test = x_test.reshape(-1, 28, 28, 1) # reshaping: (N_img, H_img, W_img, C_img)
 print ("x_train: ", x_train.shape, "y_train: ", y_train.shape)
 print ("x_test: ", x_test.shape, "y_test: ", y_test.shape)
 
 
-# 1. Padding raw img
-# padded_img: padded input raw img; H_output, W_output, C_output: the shape of the output of filter applied padded_img
-padded_img, H_conved, W_conved = padding (x_train, H_filter, W_filter, 1)
-
+# step 1. Padding raw img
+padded_img, H_filtered, W_filtered = padding (x_train, H_filter, W_filter, 1)    # padded_img: padded input raw img; The shape of the output of filter applied padded_img: (H_filtered, W_filtered, C_filtered)
 print ("padded image shape", padded_img.shape)
+
+
+# step 2. Batching
+
+
+
+
 
 # 2. Patches generation, using im2col(image to column) method (based on Toepliz Matrix)
 windows = np.lib.stride_tricks.sliding_window_view(
